@@ -1,0 +1,157 @@
+{
+  "name": "AI Chat Full Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "send-message",
+        "responseMode": "lastNode"
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-300, 0],
+      "name": "Webhook"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rvmtvbxomszjibeiocvu.hasura.eu-central-1.nhost.run/v1/graphql",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-hasura-admin-secret", "value": "YOUR_HASURA_ADMIN_SECRET" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "mutation CreateChat($user_id: uuid!) { insert_chats_one(object: { user_id: $user_id }) { id } }"
+            },
+            {
+              "name": "variables",
+              "value": "={\"user_id\": $json[\"headers\"][\"x-hasura-user-id\"]}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [-50, -100],
+      "name": "Create Chat"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rvmtvbxomszjibeiocvu.hasura.eu-central-1.nhost.run/v1/graphql",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-hasura-admin-secret", "value": "YOUR_HASURA_ADMIN_SECRET" }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "mutation InsertUserMessage($chat_id: uuid!, $text: String!) { insert_messages_one(object: { chat_id: $chat_id, sender: \"user\", text: $text }) { id chat_id sender text created_at } }"
+            },
+            {
+              "name": "variables",
+              "value": "={\"chat_id\": $json[\"chat_id\"], \"text\": $json[\"body\"][\"message\"]}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [200, 0],
+      "name": "Insert User Message"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "Bearer YOUR_OPENROUTER_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"openai/gpt-3.5-turbo\",\"messages\": [{\"role\": \"system\",\"content\": \"You are a helpful chatbot.\"},{\"role\": \"user\",\"content\": $json[\"body\"][\"message\"]}]}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 0],
+      "name": "Send to AI"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "botReply",
+              "name": "botReply",
+              "value": "={{ $json[\"choices\"][0][\"message\"][\"content\"] }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [600, 0],
+      "name": "Extract Bot Reply"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://rvmtvbxomszjibeiocvu.hasura.eu-central-1.nhost.run/v1/graphql",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-hasura-admin-secret", "value": "YOUR_HASURA_ADMIN_SECRET" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"query\": \"mutation InsertBotMessage($chat_id: uuid!, $text: String!) { insert_messages_one(object: { chat_id: $chat_id, sender: \\\"bot\\\", text: $text }) { id chat_id sender text created_at } }\",\"variables\": {\"chat_id\": $json[\"chat_id\"], \"text\": $json[\"botReply\"]}}"
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 0],
+      "name": "Insert Bot Message"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 0],
+      "name": "Return Response"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          { "node": "Create Chat", "type": "main", "index": 0 },
+          { "node": "Insert User Message", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Create Chat": { "main": [[{ "node": "Insert User Message", "type": "main", "index": 0 }]] },
+    "Insert User Message": { "main": [[{ "node": "Send to AI", "type": "main", "index": 0 }]] },
+    "Send to AI": { "main": [[{ "node": "Extract Bot Reply", "type": "main", "index": 0 }]] },
+    "Extract Bot Reply": { "main": [[{ "node": "Insert Bot Message", "type": "main", "index": 0 }]] },
+    "Insert Bot Message": { "main": [[{ "node": "Return Response", "type": "main", "index": 0 }]] }
+  },
+  "active": true
+}
